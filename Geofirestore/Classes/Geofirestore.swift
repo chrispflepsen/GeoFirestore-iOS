@@ -180,7 +180,7 @@ public enum GFSEventType {
 
 
 
-public typealias GFSQueryResultBlock = (String?, CLLocation?) -> Void
+public typealias GFSQueryResultBlock = (String?, CLLocation?, [String: Any]?) -> Void
 public typealias GFSReadyBlock = () -> Void
 public typealias GFSQueryHandle = UInt
 
@@ -199,6 +199,7 @@ public class GFSQuery {
         var isInQuery: Bool?
         var location: CLLocation?
         var geoHash: GFGeoHash?
+        var data: [String: Any]?
     }
     
     /**
@@ -248,7 +249,7 @@ public class GFSQuery {
         fatalError("Override in subclass.")
     }
     
-    internal func updateLocationInfo(_ location: CLLocation, forKey key: String) {
+    internal func updateLocationInfo(_ location: CLLocation, forKey key: String, withData data: [String: Any]? = nil) {
         var info: GFSQueryLocationInfo? = locationInfos[key]
         var isNew = false
         if info == nil {
@@ -264,23 +265,24 @@ public class GFSQuery {
         info!.location = location
         info!.isInQuery = locationIsInQuery(loc: location)
         info!.geoHash = GFGeoHash.new(withLocation: location.coordinate)
+        info!.data = data
         
         if (isNew || !(wasInQuery ?? false)) && info?.isInQuery != nil {
             for (offset: _, element: (key: _, value: block)) in keyEnteredObservers.enumerated() {
                 self.geoFirestore.callbackQueue.async {
-                    block(key, info!.location)
+                    block(key, info!.location, data)
                 }
             }
         } else if !isNew && changedLocation && info?.isInQuery != nil {
             for (offset: _, element: (key: _, value: block)) in keyMovedObservers.enumerated() {
                 self.geoFirestore.callbackQueue.async {
-                    block(key, info!.location)
+                    block(key, info!.location, data)
                 }
             }
         } else if wasInQuery ?? false && info?.isInQuery == nil {
             for (offset: _, element: (key: _, value: block)) in keyExitedObservers.enumerated() {
                 self.geoFirestore.callbackQueue.async {
-                    block(key, info!.location)
+                    block(key, info!.location, data)
                 }
             }
         }
@@ -299,10 +301,12 @@ public class GFSQuery {
         let lockQueue = DispatchQueue(label: "self")
         lockQueue.sync {
             
+            let data = snapshot?.data()
+            
             let l = snapshot?.get("l") as? [Double?]
             if let lat = l?[0], let lon = l?[1], let key = snapshot?.documentID {
                 let location = CLLocation(latitude: lat, longitude: lon)
-                updateLocationInfo(location, forKey: key)
+                updateLocationInfo(location, forKey: key, withData: data)
             }else{
                 //TODO: error??
             }
@@ -314,10 +318,12 @@ public class GFSQuery {
         let lockQueue = DispatchQueue(label: "self")
         lockQueue.sync {
             
+            let data = snapshot?.data()
+            
             let l = snapshot?.get("l") as? [Double?]
             if let lat = l?[0], let lon = l?[1], let key = snapshot?.documentID {
                 let location = CLLocation(latitude: lat, longitude: lon)
-                updateLocationInfo(location, forKey: key)
+                updateLocationInfo(location, forKey: key, withData: data)
             }else{
                 //TODO: error??
             }
@@ -330,6 +336,8 @@ public class GFSQuery {
         lockQueue.sync {
             
             if let snapshot = snapshot {
+                
+                let data = snapshot.data()
                 
                 var info: GFSQueryLocationInfo? = nil
                 let key = snapshot.documentID
@@ -349,7 +357,7 @@ public class GFSQuery {
                             if info?.isInQuery != nil {
                                 for (offset: _, element: (key: _, value: block)) in self.keyExitedObservers.enumerated() {
                                     self.geoFirestore.callbackQueue.async {
-                                        block(key, info!.location)
+                                        block(key, info!.location, data)
                                     }
                                 }
                             }
@@ -462,7 +470,7 @@ public class GFSQuery {
         queries = newQueries as! Set<GFGeoHashQuery>
         for (offset: _, element: (key: key, value: info)) in self.locationInfos.enumerated(){
             if let location = info.location{
-                self.updateLocationInfo(location, forKey: key)
+                self.updateLocationInfo(location, forKey: key, withData: info.data)
             }
         }
         var oldLocations = [String]()
@@ -537,7 +545,7 @@ public class GFSQuery {
                     lockQueue.sync {
                         for (offset: _, element: (key: key, value: info)) in self.locationInfos.enumerated(){
                             if info.isInQuery != nil{
-                                block(key, info.location)
+                                block(key, info.location, info.data)
                             }
                         }
                     }
@@ -692,4 +700,5 @@ public class GFSRegionQuery: GFSQuery {
         return GFGeoHashQuery.queries(for: self.region)
     }
 }
+
 
